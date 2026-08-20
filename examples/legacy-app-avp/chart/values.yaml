@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.27-alpine"
+  pullPolicy: IfNotPresent
+
+database:
+  host: postgres.prod.svc.cluster.local
+  port: 5432
+  name: legacy_app
+  username: legacy_app
+
+  # Resolved by argocd-vault-plugin during manifest generation.
+  #
+  # kv-v2 requires the "data/" segment in the read path. Omitting it is the most common
+  # cause of "permission denied" from OpenBao:
+  #   correct: <path:secret/data/prod/legacy-app#password>
+  #   wrong:   <path:secret/prod/legacy-app#password>
+  #
+  # The rendered output of this field contains the real password and is cached in Argo CD's
+  # Redis instance in plaintext — see docs/02-manifest-generation-openbao.md section 8.
+  password: <path:secret/data/prod/legacy-app#password>

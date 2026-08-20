@@ -1,0 +1,32 @@
+# Way 2 — the Application renders through the argocd-vault-plugin sidecar.
+#
+# Compare with examples/redis-eso/application.yaml, which uses a plain `helm:` source
+# because that chart accepts a Secret name.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: legacy-app
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/myorg/SM_Argocd.git
+    targetRevision: main
+    path: examples/legacy-app-avp/chart
+    plugin:
+      # Must match metadata.name in the ConfigManagementPlugin (avp/plugin-configmap.yaml).
+      name: argocd-vault-plugin-helm
+      env:
+        # Exposed to the plugin as $ARGOCD_ENV_HELM_ARGS.
+        # Never place a secret here: plugin env is stored in this resource in plaintext.
+        - name: HELM_ARGS
+          value: "-f values.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: legacy-app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

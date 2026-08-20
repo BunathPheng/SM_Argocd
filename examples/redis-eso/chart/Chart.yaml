@@ -1,0 +1,22 @@
+# Umbrella chart: wraps the upstream Redis chart and adds the ExternalSecret objects.
+#
+# Keeping both in one chart means one Argo CD Application, so sync waves order the
+# ExternalSecret ahead of the Redis workload.
+#
+# Pin the dependency version deliberately; check the current release before applying:
+#   helm show chart oci://registry-1.docker.io/bitnamicharts/redis
+#
+# The dependency is referenced by OCI rather than the classic HTTP repository URL. An HTTP
+# repository must be registered with `helm repo add` before `helm dependency build` will
+# resolve it against a Chart.lock, which fails inside a plugin sidecar that has no Helm
+# repository config. OCI references need no such registration.
+apiVersion: v2
+name: redis-eso
+description: Bitnami Redis with credentials supplied by External Secrets Operator from OpenBao
+type: application
+version: 0.1.0
+
+dependencies:
+  - name: redis
+    version: "20.6.2"
+    repository: oci://registry-1.docker.io/bitnamicharts
