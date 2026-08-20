@@ -1,0 +1,39 @@
+# Way 1 — no password appears anywhere in this file.
+#
+# The chart receives Secret *names*; External Secrets Operator fills those Secrets from
+# OpenBao inside the destination cluster. Argo CD never handles the values.
+
+externalSecret:
+  storeName: openbao-backend
+  storeKind: ClusterSecretStore
+  refreshInterval: 1h
+  # ESO adds the kv-v2 "data/" segment itself, so these paths omit it — the opposite of
+  # the argocd-vault-plugin placeholder syntax.
+  path: secret/prod/redis
+  aclPath: secret/prod/redis-acl
+
+redis:
+  architecture: standalone
+
+  auth:
+    enabled: true
+    # Instead of `password: "mypassword"`.
+    existingSecret: redis-auth
+    existingSecretPasswordKey: redis-password
+
+    acl:
+      # Usernames and permissions are not secret, so plaintext here is fine.
+      users:
+        - username: "my-user"
+          enabled: "on"
+          commands: "+@all"
+          keys: "~*"
+          channels: "&*"
+      # Passwords live here instead, in a Secret whose keys match the usernames above.
+      userSecret: redis-acl-users
+
+  master:
+    podAnnotations:
+      # Restart the workload when ESO rotates the Secret; Argo CD sees no drift on its own
+      # because nothing in Git changed.
+      reloader.stakater.com/auto: "true"

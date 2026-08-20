@@ -1,0 +1,124 @@
+# Strategic-merge patch adding argocd-vault-plugin sidecars to the repo-server.
+#
+# Lists merge by name, so re-declaring "var-files", "plugins", "helm-working-dir" and the
+# "copyutil" init container is idempotent against a stock Argo CD install — it also makes
+# this patch work on older installs that lack them.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      # Required: AVP exchanges this projected token for a short-lived OpenBao token.
+      automountServiceAccountToken: true
+      serviceAccountName: argocd-repo-server
+      initContainers:
+        # Keep this image tag equal to your Argo CD version: it supplies the
+        # argocd-cmp-server binary that both sidecars execute.
+        - name: copyutil
+          image: quay.io/argoproj/argocd:v2.13.1
+          command: [/bin/cp, -n, /usr/local/bin/argocd, /var/run/argocd/argocd-cmp-server]
+          volumeMounts:
+            - name: var-files
+              mountPath: /var/run/argocd
+      containers:
+        - name: avp-helm
+          image: registry.example.com/argocd-vault-plugin:1.18.1
+          command: [/var/run/argocd/argocd-cmp-server]
+          env:
+            - name: AVP_TYPE
+              value: vault
+            - name: AVP_AUTH_TYPE
+              value: k8s
+            - name: AVP_K8S_ROLE
+              value: argocd-repo-server
+            - name: AVP_K8S_MOUNT_PATH
+              value: auth/kubernetes
+            - name: AVP_KV_VERSION
+              value: "2"
+            - name: VAULT_ADDR
+              value: https://openbao.openbao.svc.cluster.local:8200
+            # readOnlyRootFilesystem: keep every Helm write under /tmp.
+            - name: HELM_CACHE_HOME
+              value: /tmp/helm/cache
+            - name: HELM_CONFIG_HOME
+              value: /tmp/helm/config
+            - name: HELM_DATA_HOME
+              value: /tmp/helm/data
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: var-files
+              mountPath: /var/run/argocd
+            - name: plugins
+              mountPath: /home/argocd/cmp-server/plugins
+            - name: argocd-vault-plugin-config
+              mountPath: /home/argocd/cmp-server/config/plugin.yaml
+              subPath: avp-helm.yaml
+            - name: cmp-tmp
+              mountPath: /tmp
+
+        - name: avp-plain
+          image: registry.example.com/argocd-vault-plugin:1.18.1
+          command: [/var/run/argocd/argocd-cmp-server]
+          env:
+            - name: AVP_TYPE
+              value: vault
+            - name: AVP_AUTH_TYPE
+              value: k8s
+            - name: AVP_K8S_ROLE
+              value: argocd-repo-server
+            - name: AVP_K8S_MOUNT_PATH
+              value: auth/kubernetes
+            - name: AVP_KV_VERSION
+              value: "2"
+            - name: VAULT_ADDR
+              value: https://openbao.openbao.svc.cluster.local:8200
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: var-files
+              mountPath: /var/run/argocd
+            - name: plugins
+              mountPath: /home/argocd/cmp-server/plugins
+            - name: argocd-vault-plugin-config
+              mountPath: /home/argocd/cmp-server/config/plugin.yaml
+              subPath: avp-plain.yaml
+            - name: cmp-tmp-plain
+              mountPath: /tmp
+      volumes:
+        - name: var-files
+          emptyDir: {}
+        - name: plugins
+          emptyDir: {}
+        - name: cmp-tmp
+          emptyDir: {}
+        - name: cmp-tmp-plain
+          emptyDir: {}
+        - name: argocd-vault-plugin-config
+          configMap:
+            name: argocd-vault-plugin-config

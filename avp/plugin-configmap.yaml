@@ -1,0 +1,71 @@
+# Config Management Plugin definitions for argocd-vault-plugin.
+#
+# Each sidecar mounts exactly one of these keys at
+# /home/argocd/cmp-server/config/plugin.yaml via subPath.
+#
+# The plugin name referenced by an Application (spec.source.plugin.name) must match
+# metadata.name below exactly.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-vault-plugin-config
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: argocd
+data:
+  avp-helm.yaml: |
+    apiVersion: argoproj.io/v1alpha1
+    kind: ConfigManagementPlugin
+    metadata:
+      name: argocd-vault-plugin-helm
+    spec:
+      allowConcurrency: true
+      lockRepo: false
+      # Only used when an Application does not name the plugin explicitly.
+      discover:
+        find:
+          command:
+            - bash
+            - "-c"
+            - "find . -maxdepth 2 -name 'Chart.yaml' | head -1"
+      generate:
+        command:
+          - bash
+          - "-c"
+          - |
+            set -o pipefail
+            # Umbrella charts need their dependencies vendored before templating.
+            #
+            # `dependency build` honours Chart.lock and is therefore reproducible, but it
+            # refuses to resolve a classic HTTP repository that is not registered via
+            # `helm repo add` — and this sidecar has no Helm repository config. OCI
+            # dependencies work either way. Fall back to `update` so charts using HTTP
+            # repository URLs still render, at the cost of ignoring the lock file.
+            if [ -f Chart.lock ] || grep -q '^dependencies:' Chart.yaml 2>/dev/null; then
+              helm dependency build >/dev/null 2>&1 || helm dependency update >/dev/null
+            fi
+            helm template "$ARGOCD_APP_NAME" \
+              --namespace "$ARGOCD_APP_NAMESPACE" \
+              --include-crds \
+              ${ARGOCD_ENV_HELM_ARGS} . \
+            | argocd-vault-plugin generate -
+
+  avp-plain.yaml: |
+    apiVersion: argoproj.io/v1alpha1
+    kind: ConfigManagementPlugin
+    metadata:
+      name: argocd-vault-plugin
+    spec:
+      allowConcurrency: true
+      lockRepo: false
+      discover:
+        find:
+          command:
+            - bash
+            - "-c"
+            - "find . -name '*.yaml' | head -1"
+      generate:
+        command:
+          - bash
+          - "-c"
+          - "argocd-vault-plugin generate ."
