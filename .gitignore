@@ -1,0 +1,4 @@
+# Vendored Helm dependencies. Chart.lock IS committed so that the `helm dependency build`
+# in the argocd-vault-plugin generate command is reproducible and offline-safe.
+charts/*.tgz
+examples/**/charts/
