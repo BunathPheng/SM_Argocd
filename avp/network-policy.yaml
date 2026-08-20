@@ -1,0 +1,122 @@
+# Hardening for Way 2: rendered manifests contain real secrets and are reachable both from
+# the Redis cache and the repo-server gRPC API.
+#
+# WHAT UPSTREAM ALREADY DOES
+# Argo CD's install.yaml ships argocd-repo-server-network-policy and
+# argocd-redis-network-policy, which already restrict *ingress* on ports 8081 and 6379 to
+# Argo CD's own components. Do not add a second ingress policy expecting it to tighten
+# things: NetworkPolicy rules are additive, so an extra policy can only ever widen access.
+# To make upstream's ingress stricter, patch that policy rather than adding one.
+#
+# If you install Argo CD via the Helm chart instead of install.yaml, those policies are not
+# created by default — enable them with `global.networkPolicy.create=true`, or port the
+# upstream objects across.
+#
+# WHAT THIS FILE ADDS
+# An egress allow-list for the repo-server. Upstream ships no egress policy, and under Way 2
+# the repo-server holds OpenBao credentials — so constraining where it can connect is the
+# control that actually changes your exposure.
+#
+# VERIFY ENFORCEMENT. Several CNI configurations accept NetworkPolicy objects and silently
+# ignore them, which is the worst outcome: the object exists, so it looks handled.
+#
+#   kubectl run np-test --rm -it --image=busybox --restart=Never -n default -- \
+#     wget -qO- --timeout=3 argocd-repo-server.argocd.svc:8081 || echo "blocked (expected)"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-repo-server-egress
+  namespace: argocd
+  annotations:
+    description: >-
+      Restricts where the repo-server (and therefore the argocd-vault-plugin sidecars) may
+      connect. Declaring policyTypes: [Egress] makes egress default-deny for these pods,
+      so every destination the plugin needs must be listed here.
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-repo-server
+  policyTypes: [Egress]
+  egress:
+    # Cluster DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # OpenBao — required by argocd-vault-plugin. Remove this rule entirely once no
+    # application depends on manifest generation.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openbao
+      ports:
+        - protocol: TCP
+          port: 8200
+
+    # Argo CD's own Redis and API server access.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+
+    # Git and Helm chart repositories over TLS, plus the Kubernetes API.
+    #
+    # Narrow this to explicit CIDRs for your Git host and chart registry wherever your
+    # environment allows it: as written, a compromised repo-server can reach any external
+    # HTTPS endpoint, which is an exfiltration path for the secrets it renders.
+    - ports:
+        - protocol: TCP
+          port: 443
+---
+# Egress allow-list for the application-controller, which also talks to Redis and needs to
+# reach destination cluster API servers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: argocd-application-controller-egress
+  namespace: argocd
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: argocd-application-controller
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: argocd-repo-server
+      ports:
+        - protocol: TCP
+          port: 8081
+    # Destination cluster API servers.
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

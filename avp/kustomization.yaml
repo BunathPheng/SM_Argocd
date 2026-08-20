@@ -1,0 +1,27 @@
+# Overlay installing Argo CD together with the argocd-vault-plugin sidecars.
+#
+#   kustomize build avp/ | kubectl apply -f -     (or: kubectl apply -k avp/)
+#
+# Keep the install.yaml tag equal to the copyutil image tag in repo-server-patch.yaml.
+#
+# If Argo CD is already installed by other means (Helm chart, operator), drop the
+# install.yaml resource below and apply the rest through that tooling instead: the
+# ConfigMap and NetworkPolicies apply as-is, and repo-server-patch.yaml becomes a
+# strategic-merge patch or a Helm `repoServer.extraContainers` value.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.1/manifests/install.yaml
+  - plugin-configmap.yaml
+  - network-policy.yaml
+
+patches:
+  - path: repo-server-patch.yaml
+    target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: argocd-repo-server
