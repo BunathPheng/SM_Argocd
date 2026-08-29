@@ -1,0 +1,18 @@
+# Lint configuration for the static Kubernetes/Argo CD manifests in this repository.
+#
+# Helm chart templates under */templates/ are Go templates, not plain YAML, so they are
+# excluded — render them with `helm template` and pipe the output through a linter instead.
+# Vendored chart dependencies (examples/**/charts/) are third-party and also excluded.
+extends: relaxed
+
+ignore: |
+  **/templates/
+  examples/**/charts/
+
+rules:
+  line-length: disable
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1
+  truthy:
+    check-keys: false
