@@ -29,8 +29,11 @@ RUN curl -fsSL \
  && argocd-vault-plugin version
 
 # UID 999 matches the argocd user used by the repo-server, so the shared
-# var-files / plugins volumes stay readable.
-RUN adduser -D -u 999 argocd
+# var-files / plugins volumes stay readable. Give the account its own group at an
+# auto-assigned GID: gid 999 is already taken by the "ping" group in alpine, and
+# busybox adduser would otherwise try to create a same-numbered group and fail.
+RUN addgroup argocd \
+ && adduser -D -H -u 999 -G argocd argocd
 USER 999
 
 ENTRYPOINT ["/var/run/argocd/argocd-cmp-server"]
